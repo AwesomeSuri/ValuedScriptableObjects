@@ -23,8 +23,6 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
         private static ValuedScriptableObjectsGeneratorSettings settings;
 
         private Vector2 _scroll;
-        private string _fileName = string.Empty;
-        private string _observerFileName = string.Empty;
 
         public static void Init()
         {
@@ -62,9 +60,9 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
         private void OnGUI()
         {
             GUILayout.BeginScrollView(_scroll);
-            
+
             settings.showHints = EditorGUILayout.Toggle("show hints", settings.showHints);
-            
+
             // additional
             GUILayout.BeginVertical("Features", "box");
             EditorGUILayout.Space(SPACE);
@@ -84,21 +82,11 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
             EditorGUILayout.LabelField("Value type", EditorStyles.boldLabel);
             if (settings.showHints)
                 EditorGUILayout.HelpBox(
-                    "Name of the class this scriptable object should store. Make sure that the class exists.",
+                    "Name of the class this scriptable object should store. Make sure that the class exists. " +
+                    "Generate multiple ValuedScriptableObjects at once by listing multiple classes seperated with a ','.",
                     MessageType.Info);
             settings.valueType = EditorGUILayout.TextField(settings.valueType);
-            _fileName = $"{settings.valueType}Object.cs";
-            _fileName = char.ToUpper(_fileName[0]) + _fileName[1..];
-            if (settings.isObservable) _fileName = $"Observable{_fileName}";
-            EditorGUI.indentLevel++;
-            GUILayout.Label($"\tThe generated ScriptableObject script will be named as {_fileName}.");
-            if (settings.isObservable && settings.generateObserver)
-            {
-                _observerFileName = $"{settings.valueType}Observer.cs";
-                _observerFileName = char.ToUpper(_observerFileName[0]) + _observerFileName[1..];
-                GUILayout.Label($"\tThe generated Observer script will be named as {_observerFileName}.");
-            }
-            EditorGUI.indentLevel--;
+            PreviewNames();
 
             EditorGUILayout.LabelField("Namespace of stored type", EditorStyles.boldLabel);
             if (settings.showHints)
@@ -154,8 +142,31 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
             }
 
             EditorGUILayout.EndHorizontal();
-            
+
             GUILayout.EndScrollView();
+        }
+
+        private void PreviewNames()
+        {
+            EditorGUILayout.LabelField("Preview of the generated files:");
+            
+            settings.valueType = settings.valueType.Replace(" ", string.Empty);
+            var types = settings.valueType.Split(',');
+            foreach (var type in types)
+            {
+                if(type.Length == 0) continue;
+                
+                var fileName = $"{type}Object.cs";
+                fileName = char.ToUpper(fileName[0]) + fileName[1..];
+                if (settings.isObservable) fileName = $"Observable{fileName}";
+                GUILayout.Label($"\t{fileName}");
+                if (settings.isObservable && settings.generateObserver)
+                {
+                    fileName = $"{type}Observer.cs";
+                    fileName = char.ToUpper(fileName[0]) + fileName[1..];
+                    GUILayout.Label($"\t{fileName}");
+                }
+            }
         }
 
         private string GenerateNamespaceFromPath()
@@ -209,8 +220,24 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
                 EditorUtility.DisplayDialog(string.Empty, "The given path does not exist.", "Ok");
                 return false;
             }
+            
+            settings.valueType = settings.valueType.Replace(" ", string.Empty);
+            var types = settings.valueType.Split(',');
 
-            var filePath = $"{settings.destinationFolder}/{_fileName}";
+            foreach (var type in types)
+            {
+                if(type.Length == 0) continue;
+                if (!WriteFile(type)) return false;
+            }
+
+            AssetDatabase.Refresh();
+            return true;
+        }
+
+        private bool WriteFile(string type)
+        {
+            var fileName = char.ToUpper(type[0]) + type[1..] + "Object";
+            var filePath = $"{settings.destinationFolder}/{fileName}.cs";
             if (File.Exists(filePath))
             {
                 var overwriteFile = EditorUtility.DisplayDialog(string.Empty,
@@ -219,39 +246,37 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
                 if (!overwriteFile) return false;
             }
 
-            using (var outfile = new StreamWriter(filePath))
+            using var outfile = new StreamWriter(filePath);
+                
+            // using directories
+            outfile.WriteLine("using UnityEngine;");
+            if (settings.sourceNamespace.Length > 0 && !settings.targetNamespace.Equals(settings.sourceNamespace))
+                outfile.WriteLine($"using {settings.sourceNamespace};");
+            outfile.WriteLine(string.Empty);
+
+            // namespace
+            var useNamespace = settings.targetNamespace.Length > 0 ? "\t" : string.Empty;
+            if (useNamespace.Length > 0)
             {
-                // using directories
-                outfile.WriteLine("using UnityEngine;");
-                if (settings.sourceNamespace.Length > 0  && !settings.targetNamespace.Equals(settings.sourceNamespace))
-                    outfile.WriteLine($"using {settings.sourceNamespace};");
-                outfile.WriteLine(string.Empty);
-
-                // namespace
-                var useNamespace = settings.targetNamespace.Length > 0 ? "\t" : string.Empty;
-                if (useNamespace.Length > 0)
-                {
-                    outfile.WriteLine($"namespace {settings.targetNamespace}");
-                    outfile.WriteLine("{");
-                }
-
-                // class start
-                var className = _fileName.Split('.')[0];
-                outfile.WriteLine($"{useNamespace}[CreateAssetMenu(" +
-                                  $"fileName = \"{className}\", " +
-                                  $"menuName = \"ValuedScriptableObjects/{settings.valueType}\")]");
-                outfile.WriteLine($"{useNamespace}public class {className} : ScriptableObject");
-                outfile.WriteLine($"{useNamespace}{{");
-
-                // value
-                outfile.WriteLine($"{useNamespace}\tpublic {settings.valueType} value;");
-
-                // class end
-                outfile.WriteLine($"{useNamespace}}}");
-                if (useNamespace.Length > 0) outfile.WriteLine("}");
+                outfile.WriteLine($"namespace {settings.targetNamespace}");
+                outfile.WriteLine("{");
             }
 
-            AssetDatabase.Refresh();
+            // class start
+            var className = fileName.Split('.')[0];
+            outfile.WriteLine($"{useNamespace}[CreateAssetMenu(" +
+                              $"fileName = \"{className}\", " +
+                              $"menuName = \"ValuedScriptableObjects/{type}\")]");
+            outfile.WriteLine($"{useNamespace}public class {className} : ScriptableObject");
+            outfile.WriteLine($"{useNamespace}{{");
+
+            // value
+            outfile.WriteLine($"{useNamespace}\tpublic {type} value;");
+
+            // class end
+            outfile.WriteLine($"{useNamespace}}}");
+            if (useNamespace.Length > 0) outfile.WriteLine("}");
+
             return true;
         }
     }
