@@ -12,7 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a5842bc2ea0e4cb4186cb07bf7130e62, type: 3}
   m_Name: ValuedScriptableObjectsGeneratorSettings
   m_EditorClassIdentifier: 
-  typeName: 
+  showHints: 1
+  valueType: 
   sourceNamespace: 
   destinationFolder: 
   targetNamespace: 
+  isObservable: 0
+  generateObserver: 0
