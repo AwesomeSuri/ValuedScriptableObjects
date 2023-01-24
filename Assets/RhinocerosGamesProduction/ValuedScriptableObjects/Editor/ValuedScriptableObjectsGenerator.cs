@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -46,8 +47,12 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
                 }
             }
 
-            if (settings.valueType.Length == 0) settings.valueType = "int";
-            if (settings.destinationFolder.Length == 0) settings.destinationFolder = Application.dataPath;
+            if (settings.valueTypes.Length == 0) settings.valueTypes = "int";
+            if (settings.destinationFolder.Length == 0)
+                settings.destinationFolder =
+                    $"{Application.dataPath}/RhinocerosGamesProduction/ValuedScriptableObjects";
+            if (settings.targetNamespace.Length == 0)
+                settings.targetNamespace = "RhinocerosGamesProduction.ValuedScriptableObjects";
         }
 
         private static string GetCurrentFileName(
@@ -85,7 +90,7 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
                     "Name of the class this scriptable object should store. Make sure that the class exists. " +
                     "Generate multiple ValuedScriptableObjects at once by listing multiple classes seperated with a ','.",
                     MessageType.Info);
-            settings.valueType = EditorGUILayout.TextField(settings.valueType);
+            settings.valueTypes = EditorGUILayout.TextField(settings.valueTypes);
             PreviewNames();
 
             EditorGUILayout.LabelField("Namespace of stored type", EditorStyles.boldLabel);
@@ -96,39 +101,22 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
             settings.sourceNamespace = EditorGUILayout.TextField(settings.sourceNamespace);
             GUILayout.EndVertical();
 
-            // target
-            GUILayout.BeginVertical("Target", "box");
-            EditorGUILayout.Space(SPACE);
-            EditorGUILayout.LabelField("Target path", EditorStyles.boldLabel);
-            if (settings.showHints)
-                EditorGUILayout.HelpBox(
-                    "Where should the script be generated?",
-                    MessageType.Info);
-            EditorGUILayout.BeginHorizontal();
-            settings.destinationFolder = EditorGUILayout.TextField(settings.destinationFolder);
-            if (GUILayout.Button("Open"))
+            // observable settings
+            if (settings.isObservable)
             {
-                settings.destinationFolder = EditorUtility.OpenFolderPanel(
-                    "Destination folder for the generated ValuedScriptableObject", settings.destinationFolder,
-                    string.Empty);
+                GUILayout.BeginVertical("Observable settings", "box");
+                EditorGUILayout.Space(SPACE);
+                EditorGUILayout.LabelField("Editor field type", EditorStyles.boldLabel);
+                if (settings.showHints)
+                    EditorGUILayout.HelpBox(
+                        "Type of inputfield shown on the inspector of the scriptable object, e.g. Int, Vector2, Bool. " +
+                        "In case of multiple generations, each must be specified seperated with a ','. " +
+                        "For reference types use \"Reference\".",
+                        MessageType.Info);
+                settings.editorFieldTypes = EditorGUILayout.TextField(settings.editorFieldTypes);
+
+                GUILayout.EndVertical();
             }
-
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.LabelField("Target namespace", EditorStyles.boldLabel);
-            if (settings.showHints)
-                EditorGUILayout.HelpBox(
-                    "Should the generated ValuedScriptableObject be inside of a namespace?",
-                    MessageType.Info);
-            EditorGUILayout.BeginHorizontal();
-            settings.targetNamespace = EditorGUILayout.TextField(settings.targetNamespace);
-            if (GUILayout.Button("From path"))
-            {
-                settings.targetNamespace = GenerateNamespaceFromPath();
-            }
-
-            EditorGUILayout.EndHorizontal();
-            GUILayout.EndVertical();
 
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Cancel"))
@@ -138,7 +126,7 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
 
             if (GUILayout.Button("Generate"))
             {
-                if (GenerateScript()) Close();
+                if (GenerateScripts()) Close();
             }
 
             EditorGUILayout.EndHorizontal();
@@ -149,13 +137,13 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
         private void PreviewNames()
         {
             EditorGUILayout.LabelField("Preview of the generated files:");
-            
-            settings.valueType = settings.valueType.Replace(" ", string.Empty);
-            var types = settings.valueType.Split(',');
+
+            settings.valueTypes = settings.valueTypes.Replace(" ", string.Empty);
+            var types = settings.valueTypes.Split(',');
             foreach (var type in types)
             {
-                if(type.Length == 0) continue;
-                
+                if (type.Length == 0) continue;
+
                 var fileName = $"{type}Object.cs";
                 fileName = char.ToUpper(fileName[0]) + fileName[1..];
                 if (settings.isObservable) fileName = $"Observable{fileName}";
@@ -169,85 +157,61 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
             }
         }
 
-        private string GenerateNamespaceFromPath()
+        private bool GenerateScripts()
         {
-            var newNamespace = new StringBuilder();
-
-            settings.destinationFolder = settings.destinationFolder.Replace('\\', '/');
-            var splits = settings.destinationFolder.Split('/');
-            var assetsIndex = -1;
-            for (int i = 0; i < splits.Length; i++)
-            {
-                if (splits[i].Equals("Assets"))
-                {
-                    assetsIndex = i;
-                    break;
-                }
-            }
-
-            if (assetsIndex >= 0)
-            {
-                for (int i = assetsIndex + 1; i < splits.Length; i++)
-                {
-                    if (newNamespace.Length > 0)
-                    {
-                        newNamespace.Append('.');
-                    }
-
-                    newNamespace.Append(splits[i].Replace(' ', '_'));
-                }
-            }
-
-            return newNamespace.ToString();
-        }
-
-        private bool GenerateScript()
-        {
-            if (settings.valueType.Length == 0)
+            if (settings.valueTypes.Length == 0)
             {
                 EditorUtility.DisplayDialog(string.Empty, "No value type has been specified.", "Ok");
                 return false;
             }
 
-            if (settings.destinationFolder.Length == 0)
-            {
-                EditorUtility.DisplayDialog(string.Empty, "Destination folder has not been specified.", "Ok");
-                return false;
-            }
+            settings.valueTypes = settings.valueTypes.Replace(" ", string.Empty);
+            var types = settings.valueTypes.Split(',').Where(t => t.Length > 0).ToArray();
 
-            if (!Directory.Exists(settings.destinationFolder))
+            if (settings.isObservable)
             {
-                EditorUtility.DisplayDialog(string.Empty, "The given path does not exist.", "Ok");
-                return false;
-            }
-            
-            settings.valueType = settings.valueType.Replace(" ", string.Empty);
-            var types = settings.valueType.Split(',');
+                settings.editorFieldTypes = settings.editorFieldTypes.Replace(" ", string.Empty);
+                var fieldTypes = settings.editorFieldTypes.Split(',').Where(t => t.Length > 0).ToArray();
+                if (fieldTypes.Length != types.Length)
+                {
+                    EditorUtility.DisplayDialog(string.Empty,
+                        "The amount of types is not the same as the amount of editor field types.", "Ok");
+                    return false;
+                }
+                
+                WriteFileObservableBase();
 
-            foreach (var type in types)
+                for (var i = 0; i < types.Length; i++)
+                {
+                    var type = types[i];
+                    var fieldType = fieldTypes[i];
+                    if (type.Length == 0) continue;
+                    if (!WriteFileObservable(type, fieldType)) return false;
+                }
+            }
+            else if (types.Where(type => type.Length != 0).Any(type => !WriteFileSimple(type)))
             {
-                if(type.Length == 0) continue;
-                if (!WriteFile(type)) return false;
+                return false;
             }
 
             AssetDatabase.Refresh();
             return true;
         }
 
-        private bool WriteFile(string type)
+        private bool WriteFileSimple(string type)
         {
-            var fileName = char.ToUpper(type[0]) + type[1..] + "Object";
+            var fileName = $"{char.ToUpper(type[0])}{type[1..]}Object";
             var filePath = $"{settings.destinationFolder}/{fileName}.cs";
             if (File.Exists(filePath))
             {
                 var overwriteFile = EditorUtility.DisplayDialog(string.Empty,
-                    "A file with the same name already exists in that path. Do you want to overwrite it?",
+                    $"A file with the same name {fileName} already exists. Do you want to overwrite it?",
                     "Yes", "No");
                 if (!overwriteFile) return false;
             }
 
             using var outfile = new StreamWriter(filePath);
-                
+
             // using directories
             outfile.WriteLine("using UnityEngine;");
             if (settings.sourceNamespace.Length > 0 && !settings.targetNamespace.Equals(settings.sourceNamespace))
@@ -275,6 +239,248 @@ namespace RhinocerosGamesProduction.ValuedScriptableObjects.Editor
 
             // class end
             outfile.WriteLine($"{useNamespace}}}");
+            if (useNamespace.Length > 0) outfile.WriteLine("}");
+
+            return true;
+        }
+
+        private void WriteFileObservableBase()
+        {
+            var fileName = "ObservableObject";
+            var filePath = $"{settings.destinationFolder}/{fileName}.cs";
+            if (File.Exists(filePath)) return;
+
+            using var outfile = new StreamWriter(filePath);
+
+            // using directories
+            outfile.WriteLine("using UnityEngine;");
+            outfile.WriteLine("using UnityEngine.Events;");
+            outfile.WriteLine(string.Empty);
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine("using UnityEditor;");
+            outfile.WriteLine("#endif");
+            outfile.WriteLine(string.Empty);
+
+            // namespace
+            var useNamespace = settings.targetNamespace.Length > 0 ? "\t" : string.Empty;
+            if (useNamespace.Length > 0)
+            {
+                outfile.WriteLine($"namespace {settings.targetNamespace}");
+                outfile.WriteLine("{");
+            }
+
+            // interface
+            outfile.WriteLine($"{useNamespace}public interface IEditorToObservableObject");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}\tvoid ForceNotify();");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine(string.Empty);
+
+            // class
+            outfile.WriteLine($"{useNamespace}public abstract class ObservableObject<T> : " +
+                              "ScriptableObject, IEditorToObservableObject");
+            outfile.WriteLine($"{useNamespace}{{");
+            // value
+            outfile.WriteLine($"{useNamespace}\tprivate T value;");
+            outfile.WriteLine($"{useNamespace}\tpublic T Value");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\tget => value;");
+            outfile.WriteLine($"{useNamespace}\t\tset");
+            outfile.WriteLine($"{useNamespace}\t\t{{");
+            outfile.WriteLine($"{useNamespace}\t\t\tthis.value = value;");
+            outfile.WriteLine($"{useNamespace}\t\t\t_event?.Invoke(value);");
+            outfile.WriteLine($"{useNamespace}\t\t}}");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine(string.Empty);
+            // event
+            outfile.WriteLine($"{useNamespace}\tprivate readonly UnityEvent<T> _event = new();");
+            outfile.WriteLine(string.Empty);
+            // subscribe
+            outfile.WriteLine($"{useNamespace}\tpublic void Subscribe(UnityAction<T> callback)");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\t_event.AddListener(callback);");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine(string.Empty);
+            // unsubscribe
+            outfile.WriteLine($"{useNamespace}\tpublic void Unsubscribe(UnityAction<T> callback)");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\t_event.RemoveListener(callback);");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine(string.Empty);
+            // set value without notify
+            outfile.WriteLine($"{useNamespace}\tpublic void SetValueWithoutNotify(T newValue)");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\tvalue = newValue;");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine(string.Empty);
+            // force notify
+            outfile.WriteLine($"{useNamespace}\tpublic void ForceNotify()");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\t_event?.Invoke(value);");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            // class end
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine(string.Empty);
+
+            // editor
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine($"{useNamespace}public abstract class ObservableObjectEditor : Editor");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}\tpublic override void OnInspectorGUI()");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            // gui
+            outfile.WriteLine($"{useNamespace}\t\tbase.OnInspectorGUI();");
+            outfile.WriteLine($"{useNamespace}\t\tShowValue();");
+            outfile.WriteLine($"{useNamespace}\t\tif (GUILayout.Button(\"Force Notify\"))");
+            outfile.WriteLine($"{useNamespace}\t\t{{");
+            outfile.WriteLine($"{useNamespace}\t\t\tvar script = (IEditorToObservableObject)target;");
+            outfile.WriteLine($"{useNamespace}\t\t\tscript.ForceNotify();");
+            outfile.WriteLine($"{useNamespace}\t\t}}");
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine(string.Empty);
+            // show value
+            outfile.WriteLine($"{useNamespace}\tprotected abstract void ShowValue();");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine("#endif");
+
+            if (useNamespace.Length > 0) outfile.WriteLine("}");
+        }
+
+        private bool WriteFileObservable(string type, string fieldType)
+        {
+            var fileName = $"Observable{char.ToUpper(type[0])}{type[1..]}Object";
+            var filePath = $"{settings.destinationFolder}/{fileName}.cs";
+            if (File.Exists(filePath))
+            {
+                var overwriteFile = EditorUtility.DisplayDialog(string.Empty,
+                    $"A file with the same name {fileName} already exists. Do you want to overwrite it?",
+                    "Yes", "No");
+                if (!overwriteFile) return false;
+            }
+
+            using var outfile = new StreamWriter(filePath);
+
+            // using directories
+            outfile.WriteLine("using UnityEngine;");
+            if (settings.sourceNamespace.Length > 0 && !settings.targetNamespace.Equals(settings.sourceNamespace))
+                outfile.WriteLine($"using {settings.sourceNamespace};");
+            outfile.WriteLine(string.Empty);
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine("using UnityEditor;");
+            outfile.WriteLine("#endif");
+            outfile.WriteLine(string.Empty);
+
+            // namespace
+            var useNamespace = settings.targetNamespace.Length > 0 ? "\t" : string.Empty;
+            if (useNamespace.Length > 0)
+            {
+                outfile.WriteLine($"namespace {settings.targetNamespace}");
+                outfile.WriteLine("{");
+            }
+
+            // class
+            var className = fileName.Split('.')[0];
+            outfile.WriteLine($"{useNamespace}[CreateAssetMenu(" +
+                              $"fileName = \"{className}\", " +
+                              $"menuName = \"ValuedScriptableObjects/Observable {type}\")]");
+            outfile.WriteLine($"{useNamespace}public class {className} : ObservableObject<{type}>");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine(string.Empty);
+
+            // editor
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine($"{useNamespace}[CustomEditor(typeof({className}))]");
+            outfile.WriteLine($"{useNamespace}public class {className}Editor : ObservableObjectEditor");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}\tprotected override void ShowValue()");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\tvar script = ({className})target;");
+            if (fieldType.Equals("Reference"))
+            {
+                outfile.WriteLine($"{useNamespace}\t\tscript.Value = ({type})EditorGUILayout.ObjectField(" +
+                                  $"\"Value\", script.Value, typeof({type}), false);");
+            }
+            else
+            {
+                outfile.WriteLine($"{useNamespace}\t\tscript.Value = EditorGUILayout.{fieldType}Field(" +
+                                  "\"Value\", script.Value);");
+            }
+
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine("#endif");
+
+            if (useNamespace.Length > 0) outfile.WriteLine("}");
+
+            return true;
+        }
+
+        private bool WriteFileObserver(string type, string fieldType)
+        {
+            var fileName = $"Observable{char.ToUpper(type[0])}{type[1..]}Object";
+            var filePath = $"{settings.destinationFolder}/{fileName}.cs";
+            if (File.Exists(filePath))
+            {
+                var overwriteFile = EditorUtility.DisplayDialog(string.Empty,
+                    $"A file with the same name {fileName} already exists. Do you want to overwrite it?",
+                    "Yes", "No");
+                if (!overwriteFile) return false;
+            }
+
+            using var outfile = new StreamWriter(filePath);
+
+            // using directories
+            outfile.WriteLine("using UnityEngine;");
+            if (settings.sourceNamespace.Length > 0 && !settings.targetNamespace.Equals(settings.sourceNamespace))
+                outfile.WriteLine($"using {settings.sourceNamespace};");
+            outfile.WriteLine(string.Empty);
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine("using UnityEditor;");
+            outfile.WriteLine("#endif");
+            outfile.WriteLine(string.Empty);
+
+            // namespace
+            var useNamespace = settings.targetNamespace.Length > 0 ? "\t" : string.Empty;
+            if (useNamespace.Length > 0)
+            {
+                outfile.WriteLine($"namespace {settings.targetNamespace}");
+                outfile.WriteLine("{");
+            }
+
+            // class
+            var className = fileName.Split('.')[0];
+            outfile.WriteLine($"{useNamespace}[CreateAssetMenu(" +
+                              $"fileName = \"{className}\", " +
+                              $"menuName = \"ValuedScriptableObjects/Observable {type}\")]");
+            outfile.WriteLine($"{useNamespace}public class {className} : ObservableObject<{type}>");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine(string.Empty);
+
+            // editor
+            outfile.WriteLine("#if UNITY_EDITOR");
+            outfile.WriteLine($"{useNamespace}[CustomEditor(typeof({className}))]");
+            outfile.WriteLine($"{useNamespace}public class {className}Editor : ObservableObject<{type}>");
+            outfile.WriteLine($"{useNamespace}{{");
+            outfile.WriteLine($"{useNamespace}\tprotected override void ShowValue()");
+            outfile.WriteLine($"{useNamespace}\t{{");
+            outfile.WriteLine($"{useNamespace}\t\tvar script = ({className})target;");
+            if (fieldType.Equals("Reference"))
+            {
+                outfile.WriteLine($"{useNamespace}\t\tscript.Value = ({type})EditorGUILayout.ObjectField(" +
+                                  $"\"Value\", script.Value, typeof({type}), false);");
+            }
+            else
+            {
+                outfile.WriteLine($"{useNamespace}\t\tscript.Value = EditorGUILayout.{fieldType}Field(" +
+                                  "\"Value\", script.Value);");
+            }
+
+            outfile.WriteLine($"{useNamespace}\t}}");
+            outfile.WriteLine($"{useNamespace}}}");
+            outfile.WriteLine("#endif");
+
             if (useNamespace.Length > 0) outfile.WriteLine("}");
 
             return true;
